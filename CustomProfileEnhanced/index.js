@@ -730,26 +730,70 @@
         if (PS && PS.emitChange) PS.emitChange();
     }
 
+    function getAlertHelpers() {
+        var alertMod = metro.findByProps("openAlert", "dismissAlert");
+        var modalMod = metro.findByProps("AlertModal", "AlertActions");
+        var inputMod = metro.findByProps("TextInput");
+        return {
+            openAlert: alertMod && alertMod.openAlert,
+            dismissAlert: alertMod && alertMod.dismissAlert,
+            AlertModal: modalMod && modalMod.AlertModal,
+            AlertActions: modalMod && modalMod.AlertActions,
+            AlertActionButton: modalMod && modalMod.AlertActionButton,
+            TextInput: inputMod && inputMod.TextInput
+        };
+    }
+
     function promptLocalCustomStatusModal(user) {
         if (!user || !user.id) return;
         var existing = (statuses[user.id] && statuses[user.id].text) || "";
         var display = user.globalName || user.username || user.id;
-        ui.alerts.showInputAlert({
-            title: "Local Custom Status (" + display + ")",
-            placeholder: "Enter custom status (leave empty to remove)...",
-            initialValue: existing,
-            confirmText: "Save",
-            cancelText: "Cancel",
-            onConfirm: function (val) {
-                if (!val || !val.trim()) {
-                    deleteStatus(user.id);
-                    showToastMsg("Removed local custom status for " + display, "TrashIcon");
-                } else {
-                    saveStatus(user.id, val);
-                    showToastMsg("Saved local custom status for " + display, "Check");
-                }
-            }
-        });
+        var helpers = getAlertHelpers();
+        if (helpers.openAlert && helpers.AlertModal && helpers.AlertActions && helpers.AlertActionButton && helpers.TextInput) {
+            var alertId = "cpe-status-" + user.id + "-" + Date.now();
+            var ModalContent = function () {
+                var stateVal = React.useState(existing);
+                var val = stateVal[0];
+                var setVal = stateVal[1];
+                return React.createElement(
+                    helpers.AlertModal,
+                    {
+                        title: "Local Custom Status (" + display + ")",
+                        content: "This status is shown only on your device. Leave empty to remove.",
+                        extraContent: React.createElement(helpers.TextInput, {
+                            placeholder: "Enter custom status...",
+                            value: val,
+                            onChange: function (v) { setVal(v); },
+                            autoFocus: true
+                        }),
+                        actions: React.createElement(
+                            helpers.AlertActions,
+                            null,
+                            React.createElement(helpers.AlertActionButton, {
+                                text: "Save",
+                                variant: "primary",
+                                onPress: function () {
+                                    helpers.dismissAlert(alertId);
+                                    if (!val || !val.trim()) {
+                                        deleteStatus(user.id);
+                                        showToastMsg("Removed local custom status for " + display, "TrashIcon");
+                                    } else {
+                                        saveStatus(user.id, val);
+                                        showToastMsg("Saved local custom status for " + display, "Check");
+                                    }
+                                }
+                            }),
+                            React.createElement(helpers.AlertActionButton, {
+                                text: "Cancel",
+                                variant: "secondary",
+                                onPress: function () { helpers.dismissAlert(alertId); }
+                            })
+                        )
+                    }
+                );
+            };
+            helpers.openAlert(alertId, React.createElement(ModalContent, null));
+        }
     }
 
     function initCustomStatuses() {
@@ -1803,16 +1847,45 @@
         }
 
         function promptTextField(title, currentValue, placeholder, onSave) {
-            ui.alerts.showInputAlert({
-                title: title,
-                initialValue: currentValue,
-                placeholder: placeholder,
-                confirmText: "Save",
-                cancelText: "Cancel",
-                onConfirm: function (val) {
-                    onSave((val || "").trim());
-                }
-            });
+            var helpers = getAlertHelpers();
+            if (helpers.openAlert && helpers.AlertModal && helpers.AlertActions && helpers.AlertActionButton && helpers.TextInput) {
+                var alertId = "cpe-input-" + Date.now();
+                var ModalContent = function () {
+                    var stateVal = React.useState(currentValue || "");
+                    var val = stateVal[0];
+                    var setVal = stateVal[1];
+                    return React.createElement(
+                        helpers.AlertModal,
+                        {
+                            title: title,
+                            extraContent: React.createElement(helpers.TextInput, {
+                                placeholder: placeholder,
+                                value: val,
+                                onChange: function (v) { setVal(v); },
+                                autoFocus: true
+                            }),
+                            actions: React.createElement(
+                                helpers.AlertActions,
+                                null,
+                                React.createElement(helpers.AlertActionButton, {
+                                    text: "Save",
+                                    variant: "primary",
+                                    onPress: function () {
+                                        helpers.dismissAlert(alertId);
+                                        onSave((val || "").trim());
+                                    }
+                                }),
+                                React.createElement(helpers.AlertActionButton, {
+                                    text: "Cancel",
+                                    variant: "secondary",
+                                    onPress: function () { helpers.dismissAlert(alertId); }
+                                })
+                            )
+                        }
+                    );
+                };
+                helpers.openAlert(alertId, React.createElement(ModalContent, null));
+            }
         }
 
         var targetId = selectedAccountId || currentUid;
@@ -1890,19 +1963,37 @@
                         subLabel: "Restore default Discord profile for the selected account",
                         icon: React.createElement(TableRow.Icon, { variant: "danger", source: getAsset("TrashIcon", "ic_message_delete") }),
                         onPress: function () {
-                            ui.alerts.showConfirmationAlert({
-                                title: "Reset Custom Profile",
-                                content: "Are you sure you want to reset all custom profile settings for this account?",
-                                confirmText: "Reset",
-                                confirmColor: "red",
-                                cancelText: "Cancel",
-                                onConfirm: function () {
-                                    resetAccountProfileData(targetId);
-                                    setData({});
-                                    forceUpdate();
-                                    showToastMsg("Custom Profile reset!", "TrashIcon");
-                                }
-                            });
+                            var helpers = getAlertHelpers();
+                            if (helpers.openAlert && helpers.AlertModal && helpers.AlertActions && helpers.AlertActionButton) {
+                                var alertId = "cpe-reset-" + Date.now();
+                                helpers.openAlert(
+                                    alertId,
+                                    React.createElement(helpers.AlertModal, {
+                                        title: "Reset Custom Profile",
+                                        content: "Are you sure you want to reset all custom profile settings for this account?",
+                                        actions: React.createElement(
+                                            helpers.AlertActions,
+                                            null,
+                                            React.createElement(helpers.AlertActionButton, {
+                                                text: "Reset",
+                                                variant: "destructive",
+                                                onPress: function () {
+                                                    helpers.dismissAlert(alertId);
+                                                    resetAccountProfileData(targetId);
+                                                    setData({});
+                                                    forceUpdate();
+                                                    showToastMsg("Custom Profile reset!", "TrashIcon");
+                                                }
+                                            }),
+                                            React.createElement(helpers.AlertActionButton, {
+                                                text: "Cancel",
+                                                variant: "secondary",
+                                                onPress: function () { helpers.dismissAlert(alertId); }
+                                            })
+                                        )
+                                    })
+                                );
+                            }
                         }
                     })
                 ),
