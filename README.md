@@ -6,8 +6,8 @@ A full-featured mobile port of **CustomProfileEnhanced** for **Kettu**, **Bunny*
 
 Paste either of the following URLs into **Settings -> Plugins -> Install a plugin (`+`)** in Kettu:
 
-- Root URL: `https://xvandat.github.io/<repo-name>/`
-- Subfolder URL: `https://xvandat.github.io/<repo-name>/CustomProfileEnhanced/`
+- Root URL: `https://xvandat.github.io/kettuplugins/`
+- Subfolder URL: `https://xvandat.github.io/kettuplugins/CustomProfileEnhanced/`
 
 ## Features
 
