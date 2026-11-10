@@ -1,0 +1,15 @@
+{
+    "name": "CustomProfileEnhanced",
+    "description": "Locally customize profiles, including avatars, banners, Nitro appearance, badges, collectibles, connections, custom statuses and account switcher previews.",
+    "authors": [
+        {
+            "name": "xVanDat",
+            "id": "0"
+        }
+    ],
+    "main": "index.js",
+    "vendetta": {
+        "icon": "ic_account_circle_24px"
+    },
+    "hash": "c1955b932f8465bd8e90edb6ead7211df8b3b78045dfd80efb83c90a5dd71356"
+}
