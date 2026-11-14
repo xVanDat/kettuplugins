@@ -4,38 +4,36 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const jsPath = path.join(__dirname, "index.js");
-const code = fs.readFileSync(jsPath, "utf8");
 
-// Validate syntax
-new Function("vendetta", `return ${code}`);
+function buildPlugin(dirPath, isRoot = false) {
+    const jsPath = path.join(dirPath, "index.js");
+    const manifestPath = path.join(dirPath, "manifest.json");
 
-const hash = crypto.createHash("sha256").update(code).digest("hex");
-const manifest = {
-    name: "CustomProfileEnhanced",
-    description: "Locally customize profiles, including avatars, banners, Nitro appearance, badges, collectibles, connections, custom statuses and account switcher previews.",
-    authors: [
-        {
-            name: "xVanDat",
-            id: "0"
-        }
-    ],
-    main: "index.js",
-    vendetta: {
-        icon: "ic_account_circle_24px"
-    },
-    hash
-};
+    if (!fs.existsSync(jsPath) || !fs.existsSync(manifestPath)) {
+        return;
+    }
 
-const manifestJson = JSON.stringify(manifest, null, 4) + "\n";
+    const code = fs.readFileSync(jsPath, "utf8");
+    // Validate syntax
+    new Function("vendetta", `return ${code}`);
 
-// Write to root
-fs.writeFileSync(path.join(__dirname, "manifest.json"), manifestJson, "utf8");
+    const hash = crypto.createHash("sha256").update(code).digest("hex");
+    const currentManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    currentManifest.hash = hash;
 
-// Also sync to CustomProfileEnhanced/ subfolder
-const subDir = path.join(__dirname, "CustomProfileEnhanced");
-fs.mkdirSync(subDir, { recursive: true });
-fs.copyFileSync(jsPath, path.join(subDir, "index.js"));
-fs.writeFileSync(path.join(subDir, "manifest.json"), manifestJson, "utf8");
+    const manifestJson = JSON.stringify(currentManifest, null, 4) + "\n";
+    fs.writeFileSync(manifestPath, manifestJson, "utf8");
 
-console.log("Syntax OK! Updated manifest.json with SHA-256 hash:", hash);
+    console.log(`[OK] Updated ${path.basename(dirPath)}${isRoot ? " (root)" : ""} manifest.json (hash: ${hash.slice(0, 12)}...)`);
+}
+
+// Build root
+buildPlugin(__dirname, true);
+
+// Build subdirectories
+const entries = fs.readdirSync(__dirname, { withFileTypes: true });
+for (const entry of entries) {
+    if (entry.isDirectory() && !entry.name.startsWith(".")) {
+        buildPlugin(path.join(__dirname, entry.name));
+    }
+}

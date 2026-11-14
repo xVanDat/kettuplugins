@@ -1,0 +1,15 @@
+{
+    "name": "DiscordAppLock",
+    "description": "Khoá bảo vệ Discord bằng Touch ID / Face ID & Mật mã iPhone, kèm tính năng che mờ hoặc hiện Logo Discord trong App Switcher.",
+    "authors": [
+        {
+            "name": "xVanDat",
+            "id": "0"
+        }
+    ],
+    "main": "index.js",
+    "vendetta": {
+        "icon": "ic_security_24px"
+    },
+    "hash": "7e7f6a734db8d1c7a2c9bbf04228c8250eb68eb189c7ab2d5f8bd064f934e3db"
+}
