@@ -407,7 +407,7 @@
         var skuId = readString(value, "skuId", "sku_id") || requestedSkuId;
         var asset = readString(value, "asset");
         if (skuId !== requestedSkuId || !asset) return null;
-        return { skuId: skuId, asset: asset, expiresAt: null, expires_at: null, type: 0 };
+        return { skuId: skuId, sku_id: skuId, asset: asset, expiresAt: null, expires_at: null, type: 0 };
     }
     function normalizeProfileEffect(value, requestedSkuId) {
         if (!isRecord(value) || value.type !== 1) return null;
@@ -415,6 +415,7 @@
         if (skuId !== requestedSkuId) return null;
         return {
             skuId: skuId,
+            sku_id: skuId,
             title: readString(value, "title"),
             description: readString(value, "description"),
             accessibilityLabel: readString(value, "accessibilityLabel", "accessibility_label"),
@@ -428,21 +429,43 @@
             type: 1
         };
     }
-    function normalizeNameplate(value, requestedSkuId) {
-        if (!isRecord(value) || value.type !== 2) return null;
-        var skuId = readString(value, "skuId", "sku_id") || requestedSkuId;
-        var asset = readString(value, "asset");
-        var palette = readString(value, "palette");
-        if (skuId !== requestedSkuId || !asset || !palette) return null;
+    function sanitizeNameplate(np) {
+        if (!np || typeof np !== "object") return null;
+        var sku = readString(np, "skuId", "sku_id");
+        var asset = readString(np, "asset");
+        var palette = readString(np, "palette") || "cobalt";
+        if (!sku || !asset) return null;
         return {
-            skuId: skuId,
+            skuId: sku,
+            sku_id: sku,
             asset: asset,
-            label: readString(value, "label") || "Nameplate",
+            label: readString(np, "label") || "Nameplate",
             palette: palette,
+            paletteId: palette,
+            palette_id: palette,
             expiresAt: null,
             expires_at: null,
             type: 2
         };
+    }
+    function normalizeNameplate(value, requestedSkuId) {
+        if (!isRecord(value) || value.type !== 2) return null;
+        var skuId = readString(value, "skuId", "sku_id") || requestedSkuId;
+        var asset = readString(value, "asset");
+        var palette = readString(value, "palette") || "cobalt";
+        if (skuId !== requestedSkuId || !asset) return null;
+        return sanitizeNameplate({
+            skuId: skuId,
+            sku_id: skuId,
+            asset: asset,
+            label: readString(value, "label") || "Nameplate",
+            palette: palette,
+            paletteId: palette,
+            palette_id: palette,
+            expiresAt: null,
+            expires_at: null,
+            type: 2
+        });
     }
     function findCollectible(value, requestedSkuId, normalize, visited) {
         if (!visited) visited = new Set();
@@ -478,26 +501,31 @@
         return extractSkuId(value) || (value.replace(/\D/g, "") || undefined);
     }
     function withCollectibles(original, frame, nameplate) {
+        var cleanNp = nameplate ? sanitizeNameplate(nameplate) : null;
         if (isRecord(original)) {
             var cached = mergedCollectiblesCache.get(original);
-            if (cached && cached.frame === frame && cached.nameplate === nameplate) return cached.value;
+            if (cached && cached.frame === frame && cached.nameplate === cleanNp) return cached.value;
             var value = Object.assign({}, original);
             if (frame) {
                 value.profileFrame = frame;
                 value.profile_frame = frame;
             }
-            if (nameplate) value.nameplate = nameplate;
-            mergedCollectiblesCache.set(original, { frame: frame, nameplate: nameplate, value: value });
+            if (cleanNp) {
+                value.nameplate = cleanNp;
+            }
+            mergedCollectiblesCache.set(original, { frame: frame, nameplate: cleanNp, value: value });
             return value;
         }
-        var cacheKey = (frame ? frame.skuId : "") + ":" + (nameplate ? nameplate.skuId : "");
+        var cacheKey = (frame ? (frame.sku_id || frame.skuId || "") : "") + ":" + (cleanNp ? (cleanNp.sku_id || cleanNp.skuId || "") : "");
         if (emptyCollectiblesCache.has(cacheKey)) return emptyCollectiblesCache.get(cacheKey);
         var val = {};
         if (frame) {
             val.profileFrame = frame;
             val.profile_frame = frame;
         }
-        if (nameplate) val.nameplate = nameplate;
+        if (cleanNp) {
+            val.nameplate = cleanNp;
+        }
         emptyCollectiblesCache.set(cacheKey, val);
         return val;
     }
@@ -512,9 +540,6 @@
     var statuses = {};
     var activities = new Map();
     var mergedActivities = new WeakMap();
-    var fakeAccounts = [];
-    var activeFakeId = null;
-    var realUserSnapshot = null;
     var _dataVersion = 0;
     var _cachedMyId = null;
 
@@ -562,7 +587,6 @@
             plugin.storage.allAccountsEnabled = Object.assign({}, allAccountsEnabled);
             plugin.storage.globalBadgesSettings = Object.assign({}, globalBadgesSettings);
             plugin.storage.customStatuses = Object.assign({}, statuses);
-            plugin.storage.fakeAccountIds = fakeAccounts.map(function (f) { return f.id; });
         } catch (e) { }
     }
 
@@ -596,7 +620,6 @@
             plugin.storage.allAccountsEnabled = plugin.storage.allAccountsEnabled || {};
             plugin.storage.globalBadgesSettings = Object.assign({}, DEFAULT_GLOBAL_BADGES_SETTINGS, plugin.storage.globalBadgesSettings || {});
             plugin.storage.customStatuses = plugin.storage.customStatuses || {};
-            plugin.storage.fakeAccountIds = plugin.storage.fakeAccountIds || [];
 
             allAccountsData = Object.assign({}, plugin.storage.allAccountsData);
             allAccountsEnabled = Object.assign({}, plugin.storage.allAccountsEnabled);
@@ -604,12 +627,21 @@
             isEnabled = Boolean(plugin.storage.isEnabled);
             globalBadgesSettings = Object.assign({}, DEFAULT_GLOBAL_BADGES_SETTINGS, plugin.storage.globalBadgesSettings);
             statuses = Object.assign({}, plugin.storage.customStatuses);
-            syncCurrentUserData();
+
+            if (storedData && storedData.nameplate) {
+                storedData.nameplate = sanitizeNameplate(storedData.nameplate);
+            }
+            for (var aid in allAccountsData) {
+                if (allAccountsData[aid] && allAccountsData[aid].nameplate) {
+                    allAccountsData[aid].nameplate = sanitizeNameplate(allAccountsData[aid].nameplate);
+                }
+            }
         } catch (e) { }
     }
 
     function resetCustomProfileCache() {
         _dataVersion++;
+        emptyCollectiblesCache.clear();
         syncStaffSpoof();
     }
 
@@ -834,244 +866,18 @@
         if (PS && PS.emitChange) PS.emitChange();
     }
 
-    // ── Fake Account Switcher ─────────────────────────────────────────────────
-    var _masStore = null;
-    var _origGetUsers = null;
-    var _origGetValidUsers = null;
-
-    function patchMultiAccountStore() {
-        if (!_masStore || _origGetUsers) return;
-        _origGetUsers = _masStore.getUsers.bind(_masStore);
-        _origGetValidUsers = _masStore.getValidUsers ? _masStore.getValidUsers.bind(_masStore) : function () { return []; };
-
-        function applyCustomName(u) {
-            if (!u || !u.id) return u;
-            var cData = allAccountsData[u.id];
-            var cEnabled = allAccountsEnabled[u.id];
-            if (!cData || !cEnabled) return u;
-            var patched = Object.assign({}, u);
-            if (cData.username) {
-                patched.username = cData.username;
-                patched.legacyUsername = cData.username;
-            }
-            if (cData.globalName) patched.globalName = cData.globalName;
-            if (cData.avatar) patched.avatar = cData.avatar;
-            return patched;
-        }
-
-        _masStore.getUsers = function () {
-            var real = _origGetUsers() || [];
-            var realIds = new Set(real.map(function (u) { return u.id; }));
-            var extras = fakeAccounts.filter(function (f) { return !realIds.has(f.id); }).map(function (f) {
-                return {
-                    id: f.id,
-                    username: f.username,
-                    globalName: f.globalName || f.username,
-                    discriminator: f.discriminator || "0",
-                    avatar: f.avatar || null,
-                    tokenStatus: 2,
-                    pushSyncToken: null
-                };
-            });
-            return real.map(applyCustomName).concat(extras);
-        };
-
-        _masStore.getValidUsers = function () {
-            var real = _origGetValidUsers() || [];
-            var realIds = new Set(real.map(function (u) { return u.id; }));
-            var extras = fakeAccounts.filter(function (f) { return !realIds.has(f.id); }).map(function (f) {
-                return {
-                    id: f.id,
-                    username: f.username,
-                    globalName: f.globalName || f.username,
-                    discriminator: f.discriminator || "0",
-                    avatar: f.avatar || null,
-                    tokenStatus: 2,
-                    pushSyncToken: null
-                };
-            });
-            return real.map(applyCustomName).concat(extras);
-        };
-
-        _masStore.getHasLoggedInAccounts = function () { return true; };
-    }
-
-    function unpatchMultiAccountStore() {
-        if (!_masStore || !_origGetUsers) return;
-        _masStore.getUsers = _origGetUsers;
-        if (_origGetValidUsers) _masStore.getValidUsers = _origGetValidUsers;
-        _origGetUsers = null;
-        _origGetValidUsers = null;
-        if (_masStore.emitChange) _masStore.emitChange();
-    }
-
-    function simulateSwitch(fake) {
-        var US = getUserStore();
-        var me = US && US.getCurrentUser && US.getCurrentUser();
-        if (!me) return;
-        if (!realUserSnapshot) {
-            realUserSnapshot = {
-                username: me.username,
-                globalName: me.globalName || me.username,
-                avatar: me.avatar,
-                banner: me.banner || null,
-                bio: me.bio || "",
-                accentColor: me.accentColor || null,
-                discriminator: me.discriminator || "0",
-                publicFlags: me.publicFlags || 0,
-                flags: me.flags || 0,
-                premiumType: me.premiumType || 0
-            };
-        }
-        activeFakeId = fake.id;
-        var cData = allAccountsData[fake.id];
-        var username = (cData && cData.username) || fake.username;
-        var globalName = (cData && cData.globalName) || fake.globalName || username;
-        var avatar = (cData && cData.avatar) || fake.avatar || null;
-        var banner = ((cData && cData.nitro) ? cData.banner : null) || fake._banner || null;
-        var bio = (cData && cData.bio) || fake._bio || "";
-        var accentColor = (cData && cData.accentColor !== undefined) ? cData.accentColor : (fake._accentColor || null);
-        var premiumType = (cData && cData.nitro) ? 2 : (fake._premiumType || 0);
-
-        FluxDispatcher.dispatch({
-            type: "USER_UPDATE",
-            user: {
-                id: me.id,
-                username: username,
-                global_name: globalName,
-                avatar: avatar,
-                banner: banner,
-                bio: bio,
-                accent_color: accentColor,
-                discriminator: fake.discriminator || "0",
-                public_flags: fake._publicFlags || 0,
-                flags: fake._flags || 0,
-                premium_type: premiumType
-            }
+    // ── Edited User Profiles Management ─────────────────────────────────────
+    function getEditedUserIds() {
+        var currentUid = getMyUserId();
+        var ids = Object.keys(allAccountsData).filter(function (id) {
+            if (!id) return false;
+            var d = allAccountsData[id];
+            return Boolean(d && (Object.keys(d).length > 0 || allAccountsEnabled[id] != null));
         });
-        if (_masStore && _masStore.emitChange) _masStore.emitChange();
-        showToastMsg("Switched preview to " + (globalName || username), "Check");
-    }
-
-    function restoreRealAccount() {
-        if (!realUserSnapshot) return;
-        var US = getUserStore();
-        var me = US && US.getCurrentUser && US.getCurrentUser();
-        if (!me) return;
-        FluxDispatcher.dispatch({
-            type: "USER_UPDATE",
-            user: {
-                id: me.id,
-                username: realUserSnapshot.username,
-                global_name: realUserSnapshot.globalName,
-                avatar: realUserSnapshot.avatar || null,
-                banner: realUserSnapshot.banner || null,
-                bio: realUserSnapshot.bio || "",
-                accent_color: realUserSnapshot.accentColor || null,
-                discriminator: realUserSnapshot.discriminator || "0",
-                public_flags: realUserSnapshot.publicFlags || 0,
-                flags: realUserSnapshot.flags || 0,
-                premium_type: realUserSnapshot.premiumType || 0
-            }
-        });
-        activeFakeId = null;
-        realUserSnapshot = null;
-        if (_masStore && _masStore.emitChange) _masStore.emitChange();
-        showToastMsg("Restored real account", "Check");
-    }
-
-    function addToSwitcher(userId) {
-        if (!userId || fakeAccounts.some(function (f) { return f.id === userId; })) return;
-        var US = getUserStore();
-        var UPS = getUserProfileStore();
-        var user = US && US.getUser && US.getUser(userId);
-        var profile = (UPS && UPS.getUserProfile && UPS.getUserProfile(userId)) || {};
-        var username = (user && user.username) || ("User_" + userId.slice(-4));
-        fakeAccounts.push({
-            id: userId,
-            username: username,
-            globalName: (user && user.globalName) || username,
-            discriminator: (user && user.discriminator) || "0",
-            avatar: (user && user.avatar) || null,
-            bot: Boolean(user && user.bot),
-            _bio: profile.bio || "",
-            _banner: profile.banner || null,
-            _accentColor: profile.accentColor || null,
-            _publicFlags: (user && user.publicFlags) || 0,
-            _flags: (user && user.flags) || 0,
-            _premiumType: (user && user.premiumType) || 0
-        });
-        saveDataToStorage();
-        patchMultiAccountStore();
-        if (_masStore && _masStore.emitChange) _masStore.emitChange();
-        showToastMsg("Added " + ((user && user.globalName) || username) + " to Switcher", "Check");
-    }
-
-    function removeFromSwitcher(userId) {
-        var idx = fakeAccounts.findIndex(function (f) { return f.id === userId; });
-        if (idx === -1) return;
-        if (activeFakeId === userId) restoreRealAccount();
-        fakeAccounts.splice(idx, 1);
-        saveDataToStorage();
-        if (_masStore && _masStore.emitChange) _masStore.emitChange();
-    }
-
-    function onSwitchEvent(action) {
-        var userId = action && (action.userId || action.user_id || action.id);
-        var fake = fakeAccounts.find(function (f) { return f.id === userId; });
-        if (fake) simulateSwitch(fake);
-    }
-    function onRemoveAccountEvent(action) {
-        var userId = action && (action.userId || action.user_id || action.id);
-        if (userId) removeFromSwitcher(userId);
-    }
-
-    function initFakeAccount() {
-        FluxDispatcher.subscribe("MULTI_ACCOUNT_SWITCH_FAILURE", onSwitchEvent);
-        FluxDispatcher.subscribe("MULTI_ACCOUNT_SWITCH_ATTEMPT", onSwitchEvent);
-        FluxDispatcher.subscribe("MULTI_ACCOUNT_REMOVE_ACCOUNT", onRemoveAccountEvent);
-        var mod = metro.findByProps("getUsers", "getValidUsers", "getHasLoggedInAccounts") || metro.findByStoreName("MultiAccountStore");
-        if (mod && typeof mod.getUsers === "function") {
-            _masStore = mod;
+        if (currentUid && isEnabled && ids.indexOf(currentUid) === -1) {
+            ids.unshift(currentUid);
         }
-        var savedIds = (plugin.storage && plugin.storage.fakeAccountIds) || [];
-        var US = getUserStore();
-        var UPS = getUserProfileStore();
-        for (var i = 0; i < savedIds.length; i++) {
-            var id = savedIds[i];
-            if (fakeAccounts.some(function (f) { return f.id === id; })) continue;
-            var user = US && US.getUser && US.getUser(id);
-            var profile = (UPS && UPS.getUserProfile && UPS.getUserProfile(id)) || {};
-            var username = (user && user.username) || ("User_" + String(id).slice(-4));
-            fakeAccounts.push({
-                id: id,
-                username: username,
-                globalName: (user && user.globalName) || username,
-                discriminator: (user && user.discriminator) || "0",
-                avatar: (user && user.avatar) || null,
-                bot: Boolean(user && user.bot),
-                _bio: profile.bio || "",
-                _banner: profile.banner || null,
-                _accentColor: profile.accentColor || null,
-                _publicFlags: (user && user.publicFlags) || 0,
-                _flags: (user && user.flags) || 0,
-                _premiumType: (user && user.premiumType) || 0
-            });
-        }
-        if (_masStore) {
-            patchMultiAccountStore();
-            if (_masStore.emitChange) _masStore.emitChange();
-        }
-    }
-
-    function cleanupFakeAccount() {
-        FluxDispatcher.unsubscribe("MULTI_ACCOUNT_SWITCH_FAILURE", onSwitchEvent);
-        FluxDispatcher.unsubscribe("MULTI_ACCOUNT_SWITCH_ATTEMPT", onSwitchEvent);
-        FluxDispatcher.unsubscribe("MULTI_ACCOUNT_REMOVE_ACCOUNT", onRemoveAccountEvent);
-        if (activeFakeId) restoreRealAccount();
-        fakeAccounts = [];
-        unpatchMultiAccountStore();
-        _masStore = null;
+        return ids;
     }
 
     // ── Staff Spoof ───────────────────────────────────────────────────────────
@@ -1241,11 +1047,17 @@
                     if (data.decorationAsset) return { asset: data.decorationAsset, skuId: data.decorationSkuId || data.decorationAsset };
                     return target.avatarDecorationData;
                 }
-                if (prop === "collectibles" && (data.profileFrame || data.nameplate)) {
-                    return withCollectibles(target.collectibles, data.profileFrame, data.nameplate);
+                if (prop === "collectibles") {
+                    if (data.profileFrame || data.nameplate) {
+                        return withCollectibles(target.collectibles, data.profileFrame, data.nameplate);
+                    }
+                    return target.collectibles;
                 }
                 if ((prop === "profileFrame" || prop === "profileFrameData") && data.profileFrame) return data.profileFrame;
-                if (prop === "nameplate" && data.nameplate) return data.nameplate;
+                if (prop === "nameplate") {
+                    if (data.nameplate) return sanitizeNameplate(data.nameplate);
+                    return target.nameplate;
+                }
                 if (prop === "publicFlags") return data.badgeFlags != null ? data.badgeFlags : target[prop];
                 if (prop === "flags" && data.badgeFlags != null) return (target.flags & ~1) | (data.badgeFlags & 1);
                 if (prop === "premiumType") return data.nitro ? 2 : target.premiumType;
@@ -1414,7 +1226,7 @@
                 merged.profileFrame = data.profileFrame;
                 merged.profileFrameData = data.profileFrame;
             }
-            if (data.nameplate) merged.nameplate = data.nameplate;
+            if (data.nameplate) merged.nameplate = sanitizeNameplate(data.nameplate);
             if (data.fakeConnections && data.fakeConnections.length > 0) {
                 var fakeAccs = formatFakeConnections(data.fakeConnections);
                 var existing = profile.connectedAccounts || profile.connected_accounts || [];
@@ -1724,7 +1536,7 @@
             }
             if (nameplateSkuId && nameplate) {
                 savedData.nameplateSkuId = nameplateSkuId;
-                savedData.nameplate = nameplate;
+                savedData.nameplate = sanitizeNameplate(nameplate);
             } else {
                 delete savedData.nameplateSkuId;
                 delete savedData.nameplate;
@@ -2378,48 +2190,53 @@
                     })
                 ),
 
-                // 11. Fake Account Switcher & Local Status
+                // 11. Edited User Profiles (Các User ID đã chỉnh sửa)
                 React.createElement(
                     TableRowGroup,
-                    { title: "Fake Account Switcher & Local Status", titleStyleType: "no_border" },
-                    activeFakeId && React.createElement(TableRow, {
-                        label: "Restore Real Account",
-                        subLabel: "Currently previewing fake account (" + activeFakeId + ")",
-                        icon: React.createElement(TableRow.Icon, { source: getAsset("RetryIcon", "ic_sync_24px") }),
-                        onPress: function () {
-                            restoreRealAccount();
-                            forceUpdate();
-                        }
-                    }),
+                    { title: "Edited User Profiles", titleStyleType: "no_border" },
                     React.createElement(TableRow, {
-                        label: "Add User to Switcher (Fake)",
-                        subLabel: "Enter a User ID to add a fake entry to the Account Switcher",
+                        label: "Edit Another User by ID",
+                        subLabel: "Enter a Discord User ID to customize their profile",
                         icon: React.createElement(TableRow.Icon, { source: getAsset("PersonPlusIcon", "ic_person_add") }),
                         onPress: function () {
-                            promptTextField("Add User ID to Fake Switcher", "", "Discord User ID", function (uid) {
+                            promptTextField("Enter User ID to Edit", "", "Discord User ID", function (uid) {
                                 if (!uid) return;
-                                addToSwitcher(uid);
+                                setSelectedAccountId(uid);
                                 forceUpdate();
                             });
                         }
                     }),
-                    fakeAccounts.map(function (fa) {
+                    getEditedUserIds().map(function (uid) {
+                        var uData = allAccountsData[uid] || (uid === currentUid ? storedData : {}) || {};
+                        var uObj = (US && US.getUser && US.getUser(uid));
+                        var displayName = (uData.globalName || uData.username) || (uObj && (uObj.globalName || uObj.username)) || ("User " + uid);
+                        var isCurrent = uid === (selectedAccountId || currentUid);
+                        var isAct = allAccountsEnabled[uid] ?? (uid === currentUid ? isEnabled : false);
+                        var isSelf = uid === currentUid;
                         return React.createElement(TableRow, {
-                            key: fa.id,
-                            label: "Switcher: " + (fa.globalName || fa.username) + " (" + fa.id + ")",
-                            subLabel: "Tap to simulate switch • Long-press to remove",
+                            key: uid,
+                            label: displayName + (isSelf ? " (You)" : ""),
+                            subLabel: uid + " • " + (isCurrent ? "Currently Editing" : (isAct ? "Active" : "Disabled")) + " • Tap to edit • Long-press to reset",
                             icon: React.createElement(TableRow.Icon, { source: getAsset("PersonIcon", "ic_account_circle_24px") }),
                             onPress: function () {
-                                simulateSwitch(fa);
+                                setSelectedAccountId(uid);
                                 forceUpdate();
+                                showToastMsg("Selected " + displayName + " for editing", "PersonIcon");
                             },
                             onLongPress: function () {
-                                removeFromSwitcher(fa.id);
+                                resetAccountProfileData(uid);
+                                if (selectedAccountId === uid) setSelectedAccountId(currentUid);
                                 forceUpdate();
-                                showToastMsg("Removed " + fa.username + " from Switcher", "TrashIcon");
+                                showToastMsg("Reset profile for " + displayName, "TrashIcon");
                             }
                         });
-                    }),
+                    })
+                ),
+
+                // 12. Local Custom Status
+                React.createElement(
+                    TableRowGroup,
+                    { title: "Local Custom Status", titleStyleType: "no_border" },
                     React.createElement(TableRow, {
                         label: "Set Local Custom Status (My Account)",
                         subLabel: (statuses[currentUid] && statuses[currentUid].text) ? ('Current: "' + statuses[currentUid].text + '"') : "Set a local custom status on your profile",
@@ -2561,19 +2378,13 @@
         onLoad: function () {
             loadDataFromStorage();
             initCustomStatuses();
-            initFakeAccount();
             installStoreHooks();
             loadBadges(globalBadgesSettings.apiUrl, globalBadgesSettings);
             FluxDispatcher.subscribe("CONNECTION_OPEN", onAccountSwitch);
-            FluxDispatcher.subscribe("MULTI_ACCOUNT_SWITCH_SUCCESS", onAccountSwitch);
-            FluxDispatcher.subscribe("MULTI_ACCOUNT_SWITCH_ATTEMPT", onAccountSwitch);
             if (isEnabled) forceAccountPanelRerender();
         },
         onUnload: function () {
             FluxDispatcher.unsubscribe("CONNECTION_OPEN", onAccountSwitch);
-            FluxDispatcher.unsubscribe("MULTI_ACCOUNT_SWITCH_SUCCESS", onAccountSwitch);
-            FluxDispatcher.unsubscribe("MULTI_ACCOUNT_SWITCH_ATTEMPT", onAccountSwitch);
-            cleanupFakeAccount();
             stopCustomStatuses();
             uninstallStoreHooks();
             forceAccountPanelRerender();
