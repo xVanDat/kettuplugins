@@ -1047,17 +1047,6 @@
                     if (data.decorationAsset) return { asset: data.decorationAsset, skuId: data.decorationSkuId || data.decorationAsset };
                     return target.avatarDecorationData;
                 }
-                if (prop === "collectibles") {
-                    if (data.profileFrame || data.nameplate) {
-                        return withCollectibles(target.collectibles, data.profileFrame, data.nameplate);
-                    }
-                    return target.collectibles;
-                }
-                if ((prop === "profileFrame" || prop === "profileFrameData") && data.profileFrame) return data.profileFrame;
-                if (prop === "nameplate") {
-                    if (data.nameplate) return sanitizeNameplate(data.nameplate);
-                    return target.nameplate;
-                }
                 if (prop === "publicFlags") return data.badgeFlags != null ? data.badgeFlags : target[prop];
                 if (prop === "flags" && data.badgeFlags != null) return (target.flags & ~1) | (data.badgeFlags & 1);
                 if (prop === "premiumType") return data.nitro ? 2 : target.premiumType;
